@@ -9,13 +9,22 @@ stages:
   displayName: Deploy nginx to OpenShift
   jobs:
   - deployment: DeployNginx
-    displayName: Deploy to ocp-dev
-    environment: ocp-dev
+    displayName: Deploy to OpenShift
+    environment:
+      name: ocp-dev
+      resourceName: webapp1
+      resourceType: Kubernetes
     strategy:
       runOnce:
         deploy:
           steps:
           - checkout: self
+
+          - script: |
+              echo "Checking manifest..."
+              ls -l
+              test -f nginx-app.yaml
+            displayName: Validate manifest exists
 
           - task: KubernetesManifest@1
             displayName: Deploy manifest
