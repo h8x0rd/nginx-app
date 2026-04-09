@@ -1,15 +1,72 @@
 trigger:
 - main
 
-pool:
-  vmImage: ubuntu-latest
+parameters:
+- name: deployMode
+  displayName: Deployment mode
+  type: string
+  default: local
+  values:
+  - local
+  - azure
+
+variables:
+  namespace: webapp1
+  manifestFile: nginx-app.yaml
 
 stages:
 - stage: Deploy
-  displayName: Deploy nginx to OpenShift
+  displayName: Deploy nginx app
   jobs:
-  - deployment: DeployNginx
-    displayName: Deploy to OpenShift
+
+  - job: DeployLocal
+    displayName: Deploy locally from OpenShift agent
+    condition: eq('${{ parameters.deployMode }}', 'local')
+    pool:
+      name: gm-agents   # change to your actual self-hosted agent pool name
+    steps:
+    - checkout: self
+
+    - script: |
+        set -e
+        echo "Running on self-hosted OpenShift agent"
+        echo "Hostname: $(hostname)"
+        echo "ServiceAccount namespace:"
+        cat /var/run/secrets/kubernetes.io/serviceaccount/namespace
+        echo
+        oc version --client
+        kubectl version --client
+      displayName: Prove local on-cluster execution
+
+    - script: |
+        set -e
+        echo "Testing cluster access"
+        oc whoami || true
+        oc project $(namespace)
+        oc get pods -n $(namespace)
+      displayName: Test cluster access
+
+    - script: |
+        set -e
+        test -f $(manifestFile)
+        oc apply -n $(namespace) -f $(manifestFile)
+      displayName: Deploy nginx app
+
+    - script: |
+        set -e
+        oc rollout status deploy/webapp1 -n $(namespace) --timeout=120s
+        oc get all -n $(namespace)
+        oc get route webapp1 -n $(namespace) -o wide
+        echo
+        echo "Route:"
+        oc get route webapp1 -n $(namespace) -o jsonpath='{.spec.host}{"\n"}'
+      displayName: Verify rollout
+
+  - deployment: DeployAzure
+    displayName: Deploy via Azure environment
+    condition: eq('${{ parameters.deployMode }}', 'azure')
+    pool:
+      vmImage: ubuntu-latest
     environment:
       name: ocp-dev
       resourceName: webapp1
@@ -21,15 +78,15 @@ stages:
           - checkout: self
 
           - script: |
-              echo "Checking manifest..."
-              ls -l
-              test -f nginx-app.yaml
+              set -e
+              test -f $(manifestFile)
+              echo "Using Azure environment/resource deployment"
             displayName: Validate manifest exists
 
           - task: KubernetesManifest@1
             displayName: Deploy manifest
             inputs:
               action: deploy
-              namespace: webapp1
+              namespace: $(namespace)
               manifests: |
-                nginx-app.yaml
+                $(manifestFile)
