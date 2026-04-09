@@ -1,0 +1,26 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Deploy
+  displayName: Deploy nginx to OpenShift
+  jobs:
+  - deployment: DeployNginx
+    displayName: Deploy to ocp-dev
+    environment: ocp-dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+
+          - task: KubernetesManifest@1
+            displayName: Deploy manifest
+            inputs:
+              action: deploy
+              namespace: webapp1
+              manifests: |
+                nginx-app.yaml
