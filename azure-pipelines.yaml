@@ -13,6 +13,8 @@ parameters:
 variables:
   namespace: webapp1
   manifestFile: nginx-app.yaml
+  deploymentName: webapp1
+  routeName: webapp1
 
 stages:
 - stage: Deploy
@@ -23,16 +25,24 @@ stages:
     displayName: Deploy locally from OpenShift agent
     condition: eq('${{ parameters.deployMode }}', 'local')
     pool:
-      name: gm-agents   # change to your actual self-hosted agent pool name
+      name: gm-agents   # change if your self-hosted pool has a different name
+
     steps:
     - checkout: self
 
     - script: |
         set -e
+        export HOME="$(Agent.TempDirectory)"
+        export KUBECONFIG="$HOME/.kube/config"
+        mkdir -p "$HOME/.kube"
+
         echo "Running on self-hosted OpenShift agent"
         echo "Hostname: $(hostname)"
         echo "ServiceAccount namespace:"
         cat /var/run/secrets/kubernetes.io/serviceaccount/namespace
+        echo
+        echo "HOME=$HOME"
+        echo "KUBECONFIG=$KUBECONFIG"
         echo
         oc version --client
         kubectl version --client
@@ -40,26 +50,47 @@ stages:
 
     - script: |
         set -e
+        export HOME="$(Agent.TempDirectory)"
+        export KUBECONFIG="$HOME/.kube/config"
+        mkdir -p "$HOME/.kube"
+
         echo "Testing cluster access"
         oc whoami || true
-        oc project $(namespace)
         oc get pods -n $(namespace)
       displayName: Test cluster access
 
     - script: |
         set -e
+        export HOME="$(Agent.TempDirectory)"
+        export KUBECONFIG="$HOME/.kube/config"
+        mkdir -p "$HOME/.kube"
+
+        echo "Validating manifest"
         test -f $(manifestFile)
+        echo "Deploying manifest"
         oc apply -n $(namespace) -f $(manifestFile)
       displayName: Deploy nginx app
 
     - script: |
         set -e
-        oc rollout status deploy/webapp1 -n $(namespace) --timeout=120s
-        oc get all -n $(namespace)
-        oc get route webapp1 -n $(namespace) -o wide
+        export HOME="$(Agent.TempDirectory)"
+        export KUBECONFIG="$HOME/.kube/config"
+        mkdir -p "$HOME/.kube"
+
+        echo "Waiting for rollout"
+        oc rollout status deployment/$(deploymentName) -n $(namespace) --timeout=180s
+
         echo
-        echo "Route:"
-        oc get route webapp1 -n $(namespace) -o jsonpath='{.spec.host}{"\n"}'
+        echo "Resources in namespace $(namespace):"
+        oc get all -n $(namespace)
+
+        echo
+        echo "Route details:"
+        oc get route $(routeName) -n $(namespace) -o wide
+
+        echo
+        echo "Application URL:"
+        oc get route $(routeName) -n $(namespace) -o jsonpath='{.spec.host}{"\n"}'
       displayName: Verify rollout
 
   - deployment: DeployAzure
@@ -79,8 +110,8 @@ stages:
 
           - script: |
               set -e
+              echo "Validating manifest"
               test -f $(manifestFile)
-              echo "Using Azure environment/resource deployment"
             displayName: Validate manifest exists
 
           - task: KubernetesManifest@1
